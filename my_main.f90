@@ -7,9 +7,11 @@ program my_main
 
   !include 'mpi.h'
 
-  ! Createpools stuff:
+  ! Numbers of things:
   integer :: nvalence  
   integer :: nconduction 
+  integer :: nbands
+  integer :: ncols = 5 ! in data file
   integer :: npools 
   integer :: nvownmax 
   integer :: ncownmax
@@ -51,6 +53,24 @@ program my_main
   integer, allocatable :: incl_array_c(:,:)
   integer, allocatable :: my_incl_array_v(:,:), my_incl_array_c(:,:)
 
+  ! HDF5 stuff:
+  character(len=10), parameter :: filename = "sds_row.h5"
+  character(len=8), parameter :: dsetname = "IntArray"
+  integer(HID_T) :: file_id
+  integer(HID_T) :: dset_id
+  integer(HID_T) :: filespace
+  integer(HID_T) :: memspace
+  integer(HID_T) :: dataspace
+  integer(HID_T) :: plist_id
+  integer(HSIZE_T), dimension(2) :: dimsf
+  integer(HSIZE_T), dimension(2) :: dimsm
+  integer(HSIZE_T), dimension(2) :: count, count_out
+  integer(HSIZE_T), dimension(2) :: offset, offset_out
+  integer(HSIZE_T), dimension(2) :: stride
+  integer(HSIZE_T), dimension(2) :: block
+  integer, allocatable :: data(:,:) ! Data to write
+  integer, allocatable :: data_out(:,:) ! Data to read back in
+  integer :: error ! hdf5 error flag
 
   comm = MPI_COMM_WORLD
   info = MPI_INFO_NULL
@@ -58,6 +78,8 @@ program my_main
   call MPI_INIT(mpierror)
   call MPI_COMM_SIZE(comm, npes, mpierror)
   call MPI_COMM_RANK(comm, inode, mpierror)
+
+  call h5open_f(error)
 
 !   Define a dummy inclusion array
   incl_array(1,1) = 2
@@ -70,16 +92,24 @@ program my_main
 
   nvalence = 4
   nconduction = 2
+  nbands = nvalence + nconduction
+
+  dimsf(1) = nbands
+  dimsf(2) = ncols
 
   ! ISSUE: in real code, the valence bands are read in separately from the
   ! conduction bands in hdf_read_bands_block, but here we have the total
   ! incl_array. We can generate an incl_array_v, incl_array_c, or...
 
+  ! Make the dummy datafile to read
+  call make_file()
+  call MPI_Barrier(comm, mpierror) ! wait for task 0 to finish
   call make_vc_incl_array(incl_array, nvalence, nconduction, &
     incl_array_v, incl_array_c)
 
+  ! Distribute bands and make local inclusion arrays
   call my_distribution()
- ! call make_my_incl_array(incl_array_v, doiownv, my_incl_array_v, nvownactual)
+  call make_my_incl_array(incl_array_v, doiownv, my_incl_array_v, nvownactual)
   call make_my_incl_array(incl_array_c, doiownc, my_incl_array_c, ncownactual)
 !  call read_bands
 
@@ -96,6 +126,12 @@ program my_main
   deallocate(invindexv)
   deallocate(invindexc)
 
+  deallocate(incl_array_v)
+  deallocate(incl_array_c)
+  deallocate(my_incl_array_v)
+  deallocate(my_incl_array_c)
+
+  call h5close_f(error)
   call MPI_FINALIZE(mpierror)
 
   contains
@@ -399,7 +435,6 @@ program my_main
           allocate(incl_array_v(j,2))
           allocate(incl_array_c(crows+1 , 2))
         
-        
           incl_array_v = incl_array(1:j, :)
           incl_array_c = incl_array(j:nrows, :)
           incl_array_v(j, 2) = find_v 
@@ -419,10 +454,39 @@ program my_main
 
       end subroutine make_vc_incl_array
      
+
+      subroutine make_file()
+
+        allocate(data( nbands, ncols) )
+
+        if (inode .eq. 0) then
+          do i = 1, nbands
+            do j = 1, ncols
+              data(i, j) = i
+            end do
+          end do
+
+          do i = 1, nbands
+              write(*,*) (data(i, j), j = 1, ncols)
+            end do
+
+          call h5fcreate_f(filename, H5F_ACC_TRUNC_F, file_id, error)
+          call h5screate_simple_f(2, dimsf, dataspace, error)
+          call h5dcreate_f(file_id, dsetname, H5T_NATIVE_INTEGER, dataspace, &
+            dset_id, error)
+          call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, data, dimsf, error)
+          call h5sclose_f(dataspace, error)
+          call h5dclose_f(dset_id, error)
+          call h5fclose_f(file_id, error)
+
+          file_write = 1
+
+        end if
+
+      end subroutine make_file
+
+
       subroutine read_bands
-
-
-
       end subroutine read_bands
 
 
