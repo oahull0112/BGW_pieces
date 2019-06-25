@@ -8,8 +8,8 @@ program my_main
   !include 'mpi.h'
 
   ! Createpools stuff:
-  integer :: nvalence = 4
-  integer :: nconduction = 6
+  integer :: nvalence  
+  integer :: nconduction 
   integer :: npools 
   integer :: nvownmax 
   integer :: ncownmax
@@ -46,9 +46,9 @@ program my_main
 
 
   ! Inclusion array stuff:
-  !integer, dimension(3,2) :: incl_array
-  integer, dimension(2, 2) :: incl_array_v
-  integer, dimension(2, 2) :: incl_array_c
+  integer, dimension(3,2) :: incl_array
+  integer, allocatable :: incl_array_v(:,:)
+  integer, allocatable :: incl_array_c(:,:)
   integer, allocatable :: my_incl_array_v(:,:), my_incl_array_c(:,:)
 
 
@@ -59,27 +59,24 @@ program my_main
   call MPI_COMM_SIZE(comm, npes, mpierror)
   call MPI_COMM_RANK(comm, inode, mpierror)
 
-  ! Define a dummy inclusion array
- ! incl_array(1,1) = 2
- ! incl_array(1,2) = 2
- ! incl_array(2,1) = 4
- ! incl_array(2,2) = 6
- ! incl_array(3,1) = 8
- ! incl_array(3,2) = 9
-  ! rows included: 2, 4, 5, 6, 8, 9
+!   Define a dummy inclusion array
+  incl_array(1,1) = 2
+  incl_array(1,2) = 2
+  incl_array(2,1) = 4
+  incl_array(2,2) = 6
+  incl_array(3,1) = 8
+  incl_array(3,2) = 9
+!  rows included: 2, 4, 5, 6, 8, 9
 
-  incl_array_v(1,1) = 2
-  incl_array_v(1,2) = 2
-  incl_array_v(2,1) = 4
-  incl_array_v(2,2) = 6
+  nvalence = 4
+  nconduction = 2
 
-  incl_array_c(1,1) = 8
-  incl_array_c(1,2) = 9
-  incl_array_c(2,1) = 11
-  incl_array_c(2,2) = 14
   ! ISSUE: in real code, the valence bands are read in separately from the
   ! conduction bands in hdf_read_bands_block, but here we have the total
   ! incl_array. We can generate an incl_array_v, incl_array_c, or...
+
+  call make_vc_incl_array(incl_array, nvalence, nconduction, &
+    incl_array_v, incl_array_c)
 
   call my_distribution()
  ! call make_my_incl_array(incl_array_v, doiownv, my_incl_array_v, nvownactual)
@@ -367,40 +364,66 @@ program my_main
         integer, intent(in) :: incl_array(:,:)
         integer, intent(in) :: nvalence
         integer, intent(in) :: nconduction    
-        integer, allocatable, intent(out) :: incl_array_v
-        integer, allocatable, intent(out) :: incl_array_c
+        integer, allocatable, intent(out) :: incl_array_v(:,:)
+        integer, allocatable, intent(out) :: incl_array_c(:,:)
 
         integer :: vcount = 0
-        integer :: j = 1
+        integer :: j = 0
         integer :: nrows
         integer :: find_v
+        integer :: crows
+        integer :: k
+
 
         nrows = size(incl_array, 1)
-
-        do while vcount .le. nvalence
-          vcount = vcount + incl_array(j, 2) - incl_array(j, 1) + 1
+        
+        do while (vcount .lt. nvalence)
           j = j + 1
-        end do while
-
-        allocate(incl_array_v(j, 2))
-        allocate(incl_array_c(nrows - j, 2))
-
-        incl_array_v = incl_array(1:j, :)
-        incl_array_c = incl_array(1:(nrows - j), :)
-
-        if (vcount .ne. nvalence) then
-          do i = 1, (incl_array(j, 2) - incl_array(j,1))
-            if (vcount .ne. nvalence) then
-              vcount = vcount - 1
-              find_v = find_v + 1
-
-
-
+          vcount = vcount + incl_array(j, 2) - incl_array(j, 1) + 1
+        end do
+        
+        
+        crows = nrows - j
+        find_v = incl_array(j, 2)
+        
+        if (vcount .eq. nvalence) then
+          allocate(incl_array_c(crows, 2))
+          allocate(incl_array_v(j, 2))
+          incl_array_v = incl_array(1:j, :)
+          incl_array_c = incl_array(j+1:nrows, :)
+        else 
+          do while (vcount .ne. nvalence)
+            vcount = vcount - 1
+            find_v = find_v - 1
+          end do
+          allocate(incl_array_v(j,2))
+          allocate(incl_array_c(crows+1 , 2))
+        
+        
+          incl_array_v = incl_array(1:j, :)
+          incl_array_c = incl_array(j:nrows, :)
+          incl_array_v(j, 2) = find_v 
+          incl_array_c(1, 1) = find_v + 1
+        end if
+        
+     !   write(*,*) "incl_array_v: "
+     !   do i = 1, j
+     !     write(*,*) (incl_array_v(i, k), k = 1, 2)
+     !   end do
+     !   
+     !   write(*,*) "incl_array_c: "
+     !   write(*,*)
+     !   do i = 1, size(incl_array_c, 1)
+     !     write(*,*) (incl_array_c(i, k), k = 1,2)
+     !   end do
 
       end subroutine make_vc_incl_array
-!    subroutine read_bands
-!
-!    end subroutine read_bands
+     
+      subroutine read_bands
+
+
+
+      end subroutine read_bands
 
 
 end program my_main

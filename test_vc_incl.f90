@@ -1,18 +1,7 @@
 program test_vc_incl
 
-  ! test:
-  ! nval = 2 not working, but nval = 4 work
-  ! nval = 5 not working, gives same result as nval = 4
-  ! nval = 7 not working
-
-  ! evens: 1, 3, 6, 8
-  ! odds: 2, 4, 5, 7
-
-  ! working now: 4, 2, 5, 7
-
   integer, dimension(4,2) :: incl_array
-  integer :: nvalence = 7
-  integer :: nconduction = 8 ! nval = 2, not working
+  integer :: nvalence = 8
   integer, allocatable :: incl_array_v(:,:)
   integer, allocatable :: incl_array_c(:,:)
 
@@ -20,7 +9,7 @@ program test_vc_incl
   integer :: j = 0
   integer :: nrows
   integer :: find_v, k
-  integer :: ccount
+  integer :: crows
 
   incl_array(1,1) = 1
   incl_array(1,2) = 1
@@ -38,13 +27,13 @@ program test_vc_incl
     vcount = vcount + incl_array(j, 2) - incl_array(j, 1) + 1
   end do
 
-  write(*,*) "j = ", j," and vcount = ", vcount
+  write(*,*) "nvalence: ", nvalence
   
-  ccount = nrows - j
+  crows = nrows - j
   find_v = incl_array(j, 2)
 
   if (vcount .eq. nvalence) then
-    allocate(incl_array_c(ccount, 2))
+    allocate(incl_array_c(crows, 2))
     allocate(incl_array_v(j, 2))
     incl_array_v = incl_array(1:j, :)
     incl_array_c = incl_array(j+1:nrows, :)
@@ -54,7 +43,7 @@ program test_vc_incl
       find_v = find_v - 1
     end do
     allocate(incl_array_v(j,2))
-    allocate(incl_array_c(ccount+1 , 2))
+    allocate(incl_array_c(crows+1 , 2))
 
     write(*,*) "find_v: ", find_v
     write(*,*) "vcount: ", vcount
