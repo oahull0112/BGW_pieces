@@ -148,6 +148,9 @@ PROGRAM read_bands
     count(1) = 1
     count(2) = ncols
 
+    ! This whole section of code is building up the hyperslabs one-by-one with a
+    ! count of 1, not taking advantage of the hyperslab "chunks"
+    ! Now that we have my_incl_array, we can take advantage of larger hyperslabs
 
     offset(1) = bands_per_proc*mpi_rank
     offset(2) = 0

@@ -93,7 +93,6 @@ program my_main
   nvalence = 4
   nconduction = 2
   nbands = nvalence + nconduction
-
   dimsf(1) = nbands
   dimsf(2) = ncols
 
@@ -104,11 +103,20 @@ program my_main
   ! Make the dummy datafile to read
   call make_file()
   call MPI_Barrier(comm, mpierror) ! wait for task 0 to finish
+  ! Split the inclusion_array into valence and conduction parts
   call make_vc_incl_array(incl_array, nvalence, nconduction, &
     incl_array_v, incl_array_c)
 
-  ! Distribute bands and make local inclusion arrays
+  ! Distribute bands evenly to the mpi tasks
   call my_distribution()
+
+  ! REMOVE THIS WHEN DONE WITH DEBUGGER!!
+  doiownv(100) = .true.
+  ! define memory space dimensions for each mpi task
+  dimsm(1) = nvownactual + ncownactual
+  dimsm(2) = ncols
+
+  ! Make the valence and conduction local inclusion arrays
   call make_my_incl_array(incl_array_v, doiownv, my_incl_array_v, nvownactual)
   call make_my_incl_array(incl_array_c, doiownc, my_incl_array_c, ncownactual)
 !  call read_bands
@@ -138,6 +146,26 @@ program my_main
 
     subroutine my_distribution()
 
+      call createpools(nvalence, nconduction, npes, npools, nvownmax, ncownmax)
+
+     ! if (npools .gt. npes) then
+        if (mod(nvalence, npools) .eq. 0) then
+          nvownmax = nvalence / npools
+        else
+          nvownmax = (nvalence/npools) + 1
+        end if
+    
+        if (mod(nconduction, (npes/npools)) .eq. 0) then
+          ncownmax = (nconduction) / (npes/npools)
+        else
+          ncownmax = (nconduction) / (npes/npools) + 1
+        end if
+     ! end if
+
+      if (inode .eq. 0) then
+        write(*,*) "nvownmax: ", nvownmax, "ncownmax: ", ncownmax
+      end if
+
       ! Make allocations:
       allocate( global_pairowner(nvalence, nconduction))
       global_pairowner(:,:) = 0
@@ -165,21 +193,7 @@ program my_main
       invindexc(:) = 0
       ! try to do this after lunch
     
-      call createpools(nvalence, nconduction, npes, npools, nvownmax, ncownmax)
     
-     ! if (npools .gt. npes) then
-        if (mod(nvalence, npools) .eq. 0) then
-          nvownmax = nvalence / npools
-        else
-          nvownmax = (nvalence/npools) + 1
-        end if
-    
-        if (mod(nconduction, (npes/npools)) .eq. 0) then
-          ncownmax = (nconduction) / (npes/npools)
-        else
-          ncownmax = (nconduction) / (npes/npools) + 1
-        end if
-     ! end if
     
       nvownactual = 0
       ncownactual = 0
@@ -276,6 +290,11 @@ program my_main
         do i = 1, nconduction
           write(*,*) (does_it_ownc(i, j), j = 1, npes)
         end do
+
+        write(*,*) "invindexv:", invindexv
+
+        write(*,*) "invindexc:", invindexc
+        
     
 !        write(*,*) "global_nvown:"
 !        write(*,*) global_nvown
@@ -283,10 +302,10 @@ program my_main
 !        write(*,*) "global_ncown:"
 !        write(*,*) global_ncown
 !    
-!        write(*,*) "global indexv:"
-!        do i = 1, nvalence
-!          write(*,*) (global_indexv(i, j), j = 1, npes)
-!        end do
+        write(*,*) "global indexv:"
+        do i = 1, nvalence
+          write(*,*) (global_indexv(i, j), j = 1, npes)
+        end do
     
       end if ! if inode == 0
 
@@ -410,14 +429,12 @@ program my_main
         integer :: crows
         integer :: k
 
-
         nrows = size(incl_array, 1)
         
         do while (vcount .lt. nvalence)
           j = j + 1
           vcount = vcount + incl_array(j, 2) - incl_array(j, 1) + 1
         end do
-        
         
         crows = nrows - j
         find_v = incl_array(j, 2)
@@ -486,8 +503,20 @@ program my_main
       end subroutine make_file
 
 
-      subroutine read_bands
-      end subroutine read_bands
+      subroutine read_bands()
+        allocate(data_out(dimsm(1), dimsm(2)))
 
+        call h5pcreate_f(H5P_FILE_ACCESS_F, plist_id, error)
+        call h5pset_fapl_mpio_f(plist_id, comm, info, mpierror)
+        call h5fopen_f(filename, H5F_ACC_RDONLY_F, file_id, & 
+          error, access_prp=plist_id)
+        call h5pclose_f(plist_id, error)
+
+        offset(2) = 0
+        offset_out(2) = 0
+        count(2) = ncols
+        count_out(2) = ncols
+
+      end subroutine read_bands
 
 end program my_main
