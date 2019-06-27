@@ -11,6 +11,7 @@ program my_main
   integer :: nvalence  
   integer :: nconduction 
   integer :: nbands
+  integer :: nbands_to_write
   integer :: ncols = 1 ! in data file
   integer :: npools 
   integer :: nvownmax 
@@ -91,17 +92,14 @@ program my_main
   incl_array(3,2) = 9
   incl_array(4,1) = 12
   incl_array(4,2) = 14
-!  rows included: 2, 4, 5, 6, 8, 9
+!  rows included: 2, 4, 5, 6, 8, 9, 12, 13, 14
+! rows_v incl: 2, 4, 5, 6, 8
+! rows_c incl: 9, 12, 13, 14
 
   nvalence = 5
   nconduction = 4
   nbands = nvalence + nconduction
-  dimsf(1) = nbands
-  dimsf(2) = ncols
-
-  ! ISSUE: in real code, the valence bands are read in separately from the
-  ! conduction bands in hdf_read_bands_block, but here we have the total
-  ! incl_array. We can generate an incl_array_v, incl_array_c, or...
+  nbands_to_write = incl_array(4,2) + 1
 
   ! Make the dummy datafile to read
   call make_file()
@@ -110,6 +108,20 @@ program my_main
   call make_vc_incl_array(incl_array, nvalence, nconduction, &
     incl_array_v, incl_array_c)
 
+  if (inode .eq. 0) then
+    write(*,*) "incl_array: "
+    do i = 1, size(incl_array,1)
+      write(*,*) (incl_array(i, j), j =1,2)
+    end do
+    write(*,*) "incl_array_v: "
+    do i = 1, size(incl_array_v,1)
+      write(*,*) (incl_array_v(i, j), j =1,2)
+    end do
+    write(*,*) "incl_array_c: "
+    do i = 1, size(incl_array_c,1)
+      write(*,*) (incl_array_c(i, j), j =1,2)
+    end do
+  end if
   ! Distribute bands evenly to the mpi tasks
   call my_distribution()
 
@@ -124,19 +136,29 @@ program my_main
        do i = 1, nvownactual
          write(*,*) (my_incl_array_v(i,j), j = 1, 2)
        end do
+       write(*,*) "task:  ", inode, "my_incl_array_c: "
+       do i = 1, ncownactual
+         write(*,*) (my_incl_array_c(i,j), j = 1, 2)
+       end do
      end if
      call MPI_Barrier(comm, mpierror)
    end do
 
   allocate(my_bands_v(nvownactual, ncols))
   allocate(my_bands_c(ncownactual, ncols))
+
   call read_bands(my_incl_array_v, nvownactual, ncols, my_bands_v)
+  call read_bands(my_incl_array_c, ncownactual, ncols, my_bands_c)
 
   do k = 1, npes
     if (inode .eq. k-1) then
-      write(*,*) "task:  ", inode
-      do i = 1, dimsm(1)
-        write(*,*) (my_bands_v(i,j), j = 1, dimsm(2))
+      write(*,*) "task:  ", inode, " my_bands_v: "
+      do i = 1, nvownactual
+        write(*,*) (my_bands_v(i,j), j = 1, ncols)
+      end do
+      write(*,*) "task:  ", inode, " my_bands_c: "
+      do i = 1, ncownactual
+        write(*,*) (my_bands_c(i,j), j = 1, ncols)
       end do
     end if
     call MPI_Barrier(comm, mpierror)
@@ -157,8 +179,11 @@ program my_main
 
   deallocate(incl_array_v)
   deallocate(incl_array_c)
-  deallocate(my_incl_array_v)
+  !deallocate(my_incl_array_v)
   deallocate(my_incl_array_c)
+
+  !deallocate(data)
+  !deallocate(data_out)
 
   call h5close_f(error)
   call MPI_FINALIZE(mpierror)
@@ -287,10 +312,15 @@ program my_main
       call MPI_BARRIER(comm, mpierror)
     
       if ( inode .eq. 0) then
-        
+
         write(*,*) "Does_it_ownv:"
         do i = 1, nvalence
           write(*,*) (does_it_ownv(i, j), j = 1, npes)
+        end do
+        
+        write(*,*) "Does_it_ownc:"
+        do i = 1, nconduction
+          write(*,*) (does_it_ownc(i, j), j = 1, npes)
         end do
         
       end if ! if inode == 0
@@ -344,7 +374,7 @@ program my_main
       integer :: next_row
       integer :: i_ia  ! "(i)ndex of (i)nclusion (a)rray" 
       integer :: i, j, k
-      integer :: init = 0
+      integer :: init 
       
       nrows = SIZE(incl_array, 1) ! first dim of incl_array
       ncols = 2 ! Fixed by def of inclusion array
@@ -355,6 +385,7 @@ program my_main
       ! in the reading routine
       allocate(my_incl_array(nownactual, ncols)) ! allocate worst case scenario
       my_incl_array = -1 ! -1 if row is extra
+      init = 0
     
       next_row = incl_array(1,1)
       i_ia = 1
@@ -464,14 +495,17 @@ program my_main
 
       subroutine make_file()
 
-        allocate(data( nbands, ncols) )
+        allocate(data( nbands_to_write, ncols) )
 
         if (inode .eq. 0) then
-          do i = 1, nbands
+          do i = 1, nbands_to_write
             do j = 1, ncols
               data(i, j) = i
             end do
           end do
+
+          dimsf(1) = nbands_to_write
+          dimsf(2) = ncols
 
           call h5fcreate_f(filename, H5F_ACC_TRUNC_F, file_id, error)
           call h5screate_simple_f(2, dimsf, dataspace, error)
@@ -481,6 +515,10 @@ program my_main
           call h5sclose_f(dataspace, error)
           call h5dclose_f(dset_id, error)
           call h5fclose_f(file_id, error)
+
+          do i = 1, nbands_to_write
+            write(*,*) (data(i,j), j = 1, ncols)
+          end do
 
           file_write = 1
 
@@ -496,35 +534,30 @@ program my_main
 
         integer :: incl_array_nrows
 
-        ! Make sure that an idle processor does not go through this code
-        ! It might be better to place this logic up higher in the main
-        ! part of the routine, because it might end up being the case that if an
-        ! MPI tasks does not get assigned anything, it needs to be given some
-        ! type of default, and it would make sense to handle all of that in the
-        ! main moreso than in this chunk of code...
+        incl_array_nrows = size(my_incl_array, 1)
+
+        dimsm(1) = row_dim ! ncownactual or nvownactual
+        dimsm(2) = col_dim
+
+        call h5pcreate_f(H5P_FILE_ACCESS_F, plist_id, error)
+        call h5pset_fapl_mpio_f(plist_id, comm, info, mpierror)
+        call h5fopen_f(filename, H5F_ACC_RDONLY_F, file_id, & 
+          error, access_prp=plist_id)
+        call h5pclose_f(plist_id, error)
+
+        call h5dopen_f(file_id, dsetname, dset_id, error)
+        call h5dget_space_f(dset_id, dataspace, error)
+        call h5screate_simple_f(2, dimsm, memspace, error)
+
+
+        if (inode .eq. 0) write(*,*) "dimsm ", dimsm
+
+        offset(2) = 0
+        offset_out(2) = 0
+        count(2) = ncols
+        count_out(2) = ncols
+
         if (row_dim .ne. 0) then
-          incl_array_nrows = size(my_incl_array, 1)
-
-          dimsm(1) = row_dim ! ncownactual or nvownactual
-          dimsm(2) = col_dim
-
-          call h5pcreate_f(H5P_FILE_ACCESS_F, plist_id, error)
-          call h5pset_fapl_mpio_f(plist_id, comm, info, mpierror)
-          call h5fopen_f(filename, H5F_ACC_RDONLY_F, file_id, & 
-            error, access_prp=plist_id)
-          call h5pclose_f(plist_id, error)
-
-
-          call h5dopen_f(file_id, dsetname, dset_id, error)
-          call h5dget_space_f(dset_id, dataspace, error)
-          call h5screate_simple_f(2, dimsm, memspace, error)
-
-
-          offset(2) = 0
-          offset_out(2) = 0
-          count(2) = ncols
-          count_out(2) = ncols
-
 
           offset(1) = my_incl_array(1,1) - 1
           count(1) = my_incl_array(1,2) - my_incl_array(1,1) + 1
@@ -535,43 +568,53 @@ program my_main
             if (my_incl_array(i, 1) .ne. -1) then
               offset(1) = my_incl_array(i,1) - 1
               count(1) = my_incl_array(i,2) - my_incl_array(i, 1) + 1
+              if (inode .eq. 0) then
+                write(*,*) "count = ", count(1), "offset = ", offset(1)
+              end if
               call H5sselect_hyperslab_f(dataspace, H5S_SELECT_OR_F, offset, &
                 count, error)
             end if
           end do
 
-!          call h5screate_simple_f(2, dimsm, memspace, error)
-          ! the 2 is the memrank, which will need to change in the real code
-
+          offset_out(1) = 0
           count_out(1) = my_incl_array(1,2) - my_incl_array(1,1) + 1
 
           call h5sselect_hyperslab_f(memspace, H5S_SELECT_SET_F, offset_out, &
             count_out, error)
           
-          offset_out(1) = count_out(1)
+          offset_out(1) = count_out(1) 
+         ! offset_out(1) = 0
           do i = 2, incl_array_nrows
             if (my_incl_array(i, 1) .ne. -1) then
               count_out(1) = my_incl_array(i, 2) - my_incl_array(i, 1) + 1
+              if (inode .eq. 0) then
+                write(*,*) "count_out = ", count_out(1), "offset_out = ", offset_out(1)
+              end if
               call h5sselect_hyperslab_f(memspace, H5S_SELECT_OR_F, offset_out, &
                 count_out, error)
               offset_out(1) = offset_out(1) + count_out(1)
             end if
           end do
 
-          call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, error)
-          call H5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, error)
-          call h5dread_f(dset_id, H5T_NATIVE_INTEGER, data_out, dimsm, error, &
-            memspace, dataspace, xfer_prp=plist_id)
+        else
+          count(1) = 0
+          offset(1) = 0
+          call h5sselect_hyperslab_f(dataspace, H5S_SELECT_SET_F, offset, &
+            count, error)
+          call h5sselect_hyperslab_f(memspace, H5S_SELECT_SET_F, offset, &
+            count, error)
+        end if ! row dim ne 0
+        call h5pcreate_f(H5P_DATASET_XFER_F, plist_id, error)
+        call H5pset_dxpl_mpio_f(plist_id, H5FD_MPIO_COLLECTIVE_F, error)
+        call h5dread_f(dset_id, H5T_NATIVE_INTEGER, data_out, dimsm, error, &
+          memspace, dataspace, xfer_prp=plist_id)
 
-          ! UNCOMMENT when code is working without error
+        call h5pclose_f(plist_id, error)
+        call h5sclose_f(memspace, error)
+        call h5sclose_f(dataspace, error)
+        call h5dclose_f(dset_id, error)
+        call h5fclose_f(file_id, error)
 
-          call h5pclose_f(plist_id, error)
-          call h5sclose_f(memspace, error)
-          call h5sclose_f(dataspace, error)
-          call h5dclose_f(dset_id, error)
-          call h5fclose_f(file_id, error)
-
-        end if
       end subroutine read_bands
 
 end program my_main
