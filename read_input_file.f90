@@ -4,9 +4,11 @@ program read_input_file
 
   integer :: nbands
   integer :: nband_ranges
+  integer :: n_incl_rows
   integer, allocatable :: incl_array(:,:) ! (number_band_ranges, 2)
   character*256 :: blockword, keyword, line, errmsg
-  integer :: ii
+  integer :: ii, i, j, iostat
+  integer, dimension(2) :: what_is_this
 
 
   call open_file(55,file='epsilon.inp',form='formatted',status='old')
@@ -25,13 +27,88 @@ program read_input_file
     if (trim(keyword).eq.'begin') then
       blockword=line(1:scan(line," ")-1)
       ii = 0
+      do while (trim(line).ne.'end')
+        read(55, '(a256)', iostat=iostat) line
+        if(trim(line).ne.'end') then
+          ii = ii+1
+          if(trim(blockword).eq.'band_ranges') then
+            if( allocated(incl_array)) then
+            !  read(line,*,iostat=iostat) what_is_this(1),what_is_this(2)
+              read(line,*,iostat=iostat) incl_array(ii, 1), incl_array(ii, 2)
+              ! need to allocate incl_array based on number_band_ranges
+              !write(*,*) incl_array(ii, 1), incl_array(ii,2)
+            else
+              write(errmsg,'(3a)') "number_band_ranges must be listed before &
+                begin_band_ranges in the input file"
+              call die(errmsg, only_root_writes = .true.)
+            end if ! allocated
+          end if ! trim(blockword)
+        end if ! trim(line).ne.'end'
+      end do ! while (trim(line).ne.'end'
+!    end if ! trim keyword .eq. begin
+
+    elseif(trim(keyword).eq.'number_band_ranges') then
+      read(line,*,iostat=iostat) n_incl_rows
+      allocate(incl_array(n_incl_rows, 2))
+    else
+      write(*,*) ' '
     end if
+
+
   end do
 
-  write(*,*) "keyword = ", keyword
-  write(*,*) "blockword = ", blockword
+  do i = 1, n_incl_rows
+    write(*,*) (incl_array(i, j), j = 1,2)
+  end do
+
   
     contains
+
+      function TRUNC(s)
+        character(len=*), intent(in) :: s
+        character(len=len_trim(adjustl(s))) :: TRUNC
+
+        TRUNC = trim(adjustl(s))
+      end function TRUNC
+
+      subroutine die(str, only_root_writes)
+
+        character (len=*), intent(in) :: str
+        logical, optional, intent(in) :: only_root_writes
+
+        logical :: should_write, should_write_prefix, is_open
+
+        should_write = .true.
+        should_write_prefix = .false.
+        if (present(only_root_writes)) then
+          if (.not.only_root_writes) then
+            should_write = .true.
+            should_write_prefix = .true.
+          endif
+        endif
+
+        ! FHJ: FLUSH is not really reliable because the OS might cache the stdout.
+        ! Sleeping for 1s is the best solution I found to make the output clean,
+        ! otherwise the error message would show up before regular output.
+        call sleep(1)
+        ! FHJ: if we are not writing, wait 5s for the root node to get here and
+        ! write the error message. If the root doesn`t get here, we all print the
+        ! error messsage anyways and die.
+        if (.not.should_write) then
+          call sleep(5)
+        endif
+        write(0,*)
+        if (should_write_prefix) write(0, '(a, i6, a)', advance='no') 
+        write(0, '(2a)') "ERROR: ", TRUNC(str)
+        write(0,*)
+        FLUSH(0)
+
+        ! FHJ: Use libc`s abort funciton.
+        ! Fortran`s `stop` or `error stop` don`t give us the traceback!
+        call abort()
+
+      end subroutine die
+
       subroutine open_file(unit, file, status, form, position, access, iostat)
   
       integer,          intent(in) :: unit
