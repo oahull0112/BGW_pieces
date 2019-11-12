@@ -1,4 +1,4 @@
-PROGRAM my_distribution
+PROGRAM relevant_distribution
 
   USE HDF5
   USE mpi
@@ -263,6 +263,6 @@ PROGRAM my_distribution
 
     end subroutine createpools
 
-END PROGRAM my_distribution
+END PROGRAM relevant_distribution
 
 
